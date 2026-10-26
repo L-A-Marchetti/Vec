@@ -38,8 +38,9 @@ int main(void)
         vec_destroy(&points);
         return 1;
     }
-    Point *first = vec_at(&points, 0);
-    printf("%.1f, %.1f\n", first->x, first->y);
+    for (Point *it = vec_begin(&points); it != vec_end(&points); ++it) {
+        printf("%.1f, %.1f\n", it->x, it->y);
+    }
     vec_destroy(&points);
     return 0;
 }
