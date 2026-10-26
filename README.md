@@ -21,27 +21,43 @@ especially for small elements; see the [measured results](benchmarks/README.md).
 
 ## Quick start
 
+The same `Vec` type and functions work with integers, structures, and other
+fixed-size types. Each vector stores one element type; choose its size at creation.
+No type-specific macros or generated declarations are needed.
+
 Save this as `main.c` beside `vec.c` and `vec.h`:
 
 ```c
 #include "vec.h"
 #include <stdio.h>
 
+typedef struct Point { double x, y; } Point;
+
 int main(void)
 {
-    Vec values = vec_new(sizeof(int));
-    for (int i = 1; i <= 5; ++i) {
-        if (vec_push(&values, &i) == NULL) {
-            perror("vec_push");
-            vec_destroy(&values);
-            return 1;
-        }
+    Vec numbers = vec_new(sizeof(int));
+    Vec points = vec_new(sizeof(Point));
+    int number = 42;
+    Point point = {1.0, 2.0};
+    int result = 1;
+
+    /* Same operation, different element types. Both values are copied. */
+    if (vec_push(&numbers, &number) == NULL ||
+        vec_push(&points, &point) == NULL) {
+        perror("vec_push");
+        goto cleanup;
     }
-    for (int *it = vec_begin(&values); it != vec_end(&values); ++it) {
-        printf("%d\n", *it);
+
+    printf("number: %d\n", *(int *)vec_at(&numbers, 0));
+    for (Point *it = vec_begin(&points); it != vec_end(&points); ++it) {
+        printf("point: %.1f, %.1f\n", it->x, it->y);
     }
-    vec_destroy(&values);
-    return 0;
+    result = 0;
+
+cleanup:
+    vec_destroy(&numbers);
+    vec_destroy(&points);
+    return result;
 }
 ```
 
@@ -49,6 +65,15 @@ int main(void)
 cc -std=c11 -O2 -Wall -Wextra main.c vec.c -o app
 ./app
 ```
+
+```text
+number: 42
+point: 1.0, 2.0
+```
+
+Use the matching type when inserting or reading elements: Vec cannot check it
+for you. For vectors of pointers and resource ownership, see the
+[API examples](docs/API.md#pointers-and-ownership).
 
 ## Example: summarize request records
 
