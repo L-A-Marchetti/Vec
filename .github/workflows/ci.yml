@@ -1,0 +1,15 @@
+name: C tests
+on: [push, pull_request]
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        compiler: [gcc, clang]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: make CC=${{ matrix.compiler }} test
+      - run: make CC=${{ matrix.compiler }} sanitize
+      - run: make CC=${{ matrix.compiler }} build/example
+      - run: test "$(printf '10 20 30\n' | ./build/example)" = "$(printf '20\n30')"

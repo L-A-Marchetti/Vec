@@ -4,6 +4,7 @@
 #include "test.h"
 
 #include <vec.h>
+#include <stdint.h>
 
 static void test_shrink_on_empty(void) {
     Vec v = vec_new(sizeof(int));
@@ -151,9 +152,9 @@ static void test_reserve_success(void) {
 }
 
 static void test_push_overflow_guard_on_growth(void) {
-    // Choose elem_size=8 and capacity so that doubling would overflow bytes
+    // Exhaust the maximum representable capacity for eight-byte elements.
     Vec v = vec_new(8);
-    v.capacity = (SIZE_MAX / 8) - 1; // doubling would exceed SIZE_MAX/elem_size
+    v.capacity = SIZE_MAX / 8; // no further element fits
     v.len = v.capacity;              // force growth path
     errno = 0;
     int x = 42;
@@ -164,7 +165,43 @@ static void test_push_overflow_guard_on_growth(void) {
     vec_destroy(&v);
 }
 
+static void test_self_push(void) {
+    Vec v = vec_new(sizeof(int));
+    int x = 42;
+    EXPECT_TRUE(vec_push(&v, &x) != NULL);
+    EXPECT_TRUE(vec_push(&v, vec_at(&v, 0)) != NULL);
+    EXPECT_EQ_INT(*(int*)vec_back(&v), 42);
+    EXPECT_TRUE(vec_reserve(&v, 8));
+    EXPECT_TRUE(vec_push(&v, vec_at(&v, 1)) != NULL);
+    EXPECT_EQ_INT(*(int*)vec_back(&v), 42);
+    vec_destroy(&v);
+}
+
+static void test_invalid_and_destroy(void) {
+    errno = 0;
+    Vec v = vec_new(0);
+    EXPECT_EQ_INT(errno, EINVAL);
+    int x = 1;
+    EXPECT_TRUE(vec_push(&v, &x) == NULL);
+    EXPECT_EQ_INT(errno, EINVAL);
+    EXPECT_EQ_INT(vec_reserve(&v, 1), 0);
+    vec_destroy(&v);
+    v = vec_new(sizeof(int));
+    EXPECT_TRUE(vec_push(&v, NULL) == NULL);
+    EXPECT_EQ_INT(errno, EINVAL);
+    EXPECT_EQ_ULL(v.len, 0);
+    EXPECT_TRUE(vec_push(&v, &x) != NULL);
+    vec_destroy(&v);
+    vec_destroy(&v);
+    EXPECT_TRUE(v.data == NULL);
+    EXPECT_EQ_ULL(v.elem_size, 0);
+    EXPECT_EQ_ULL(v.capacity, 0);
+    EXPECT_EQ_ULL(v.len, 0);
+}
+
 int main(void) {
+    RUN_TEST(test_self_push);
+    RUN_TEST(test_invalid_and_destroy);
     RUN_TEST(test_shrink_on_empty);
     RUN_TEST(test_pop_on_empty);
     RUN_TEST(test_push_after_shrink);

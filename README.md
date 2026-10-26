@@ -1,166 +1,151 @@
-# 🌀 Vec
-## A Generic Vector for C
+# Vec
 
-Vec is a generic, fast, leak‑safe dynamic array for C. It stores elements contiguously, grows geometrically (×2) for amortized O(1) push, and offers a method‑style API that feels natural if you like object syntax in C. The library is defensive by default: overflow guards before allocations, bounds‑checked accessors, and well‑defined behavior for empty/shrink/destroy.
+A small generic dynamic array for C11, with ordinary functions and explicit
+allocation errors. Copy `vec.c` and `vec.h` into your project; no dependencies
+beyond the C standard library.
 
-Why you might want it
-- Contiguous memory: better cache locality and prefetching than node‑based structures, fewer pointer indirections, great for iteration and SIMD‑friendly data.
-- Geometric growth: doubles capacity at the edge, so most pushes are O(1). Resizes are infrequent and predictable.
-- Truly generic in C: type erasure via `elem_size` — no macros, no code generation, no void* arithmetic in user code.
-- Ergonomic API: free‑function API in all builds; optional method‑style function pointers if you like object syntax in C; `begin`/`end` for clean for‑loops.
-- Safety first: guards against `size_t` overflow on capacity math, safe `shrink(0)`, `pop` is a no‑op on empty, `vec_at` returns NULL out‑of‑bounds, `destroy` zeros state. The test suite runs clean under valgrind.
+Vec stores shallow copies of fixed-size elements in contiguous memory. It grows
+geometrically, provides bounds-checked access, and leaves the vector unchanged
+when an allocation fails. It does not print errors or terminate your program.
 
-Design in a nutshell
-- Contiguous storage: elements live in a single growable buffer. This maximizes spatial locality and enables tight pointer iteration: `for (T* it = begin; it != end; ++it) { ... }`.
-- Growth strategy: capacity grows by ×2 when needed. The classic amortized analysis shows O(1) average push because the cost of copy during reallocation is spread across many future inserts.
-- Size vs capacity: `len` is the number of elements; `capacity` is how many fit without reallocating. Use `vec_reserve` to pre‑grow, and `vec_shrink` to release slack back to the allocator.
-- Robust realloc: `vec_shrink` handles `len == 0` by freeing and nulling the buffer (no dangling pointer from `realloc(ptr, 0)`). All allocation paths guard against `SIZE_MAX / elem_size` overflow before multiplying.
-- Predictable pointers: pointers from `vec_at`, `vec_begin`, `vec_end`, and `vec_back` are stable until a resizing operation (`push` that grows, `reserve`, `shrink`). After a grow/shrink, reacquire pointers.
+## Quick start
 
-Memory model (what you can rely on)
-- The backing storage is a single `unsigned char*` block. Elements are laid out back‑to‑back with stride `elem_size`.
-- Iteration uses standard pointer arithmetic over your element type: `T* it = (T*)vec_begin(&v); for (; it != (T*)vec_end(&v); ++it) ...` (method‑style variants exist too).
-- Because the data is contiguous, bulk ops like `memcpy`/`memmove` for remove/shrink are straightforward and efficient.
-
-Build, Install, Test
-```
-# Build static library in ./build
-make
-
-# Install header and library (default PREFIX=/usr/local)
-sudo make install
-
-# Run tests (links against installed lib, uses <vec.h>)
-make test
-```
-
-Linking in your project
-```
-cc -std=c11 -O2 your_app.c -lvec -o your_app
-```
-
-Compile‑time option
-- LITE mode (no method pointers in `Vec`):
-  - Build the library with `-DLITE` to minimize the `Vec` footprint and expose only the free‑function API.
-  - Example: `CFLAGS="-std=c11 -O2 -DLITE" make clean && make`
-
-Usage examples
-
-Free‑function style (works in all builds):
 ```c
-#include <vec.h>
+#include "vec.h"
 #include <stdio.h>
 
-int main(void) {
-  Vec v = vec_new(sizeof(int));
-  for (int i = 1; i <= 5; ++i) vec_push(&v, &i);
-
-  for (int *it = (int*)vec_begin(&v); it != (int*)vec_end(&v); ++it) {
-    printf("%d ", *it);
-  }
-  printf("| at[0]=%d | back=%d\n",
-         *(int*)vec_at(&v, 0),
-         *(int*)vec_back(&v));
-
-  vec_destroy(&v);
-  return 0;
+int main(void)
+{
+    Vec values = vec_new(sizeof(int));
+    for (int i = 1; i <= 5; ++i) {
+        if (vec_push(&values, &i) == NULL) {
+            perror("vec_push");
+            vec_destroy(&values);
+            return 1;
+        }
+    }
+    for (int *it = vec_begin(&values); it != vec_end(&values); ++it) {
+        printf("%d\n", *it);
+    }
+    vec_destroy(&values);
+    return 0;
 }
 ```
 
-Method‑style (requires non‑LITE build):
-```c
-#include <vec.h>
-#include <stdio.h>
+Compile alongside your application:
 
-int main(void) {
-  Vec v = vec_new(sizeof(char));
-  const char s[] = "abcdef";
-  for (size_t i = 0; i < sizeof(s)-1; ++i) v.push(&v, &s[i]);
-
-  for (char *it = v.begin(&v); it != v.end(&v); ++it) printf("%c ", *it);
-  printf("| at[1]=%c | back=%c\n",
-         *(char*)v.at(&v, 1),
-         *(char*)v.back(&v));
-
-  v.destroy(&v);
-  return 0;
-}
+```sh
+cc -std=c11 -O2 -Wall -Wextra -Ipath/to/Vec main.c path/to/Vec/vec.c -o app
 ```
 
-Safety & semantics
-- Allocation safety: capacity growth checks avoid `size_t` overflow; on failure, operations return `NULL`/`0` and set `errno = ENOMEM`.
-- `vec_at(v,i)`: returns `NULL` when `i >= len` or data is `NULL`.
-- `vec_pop(v)`: no‑op when empty.
-- `vec_shrink(v)`: if `len == 0`, frees storage and sets `data=NULL`, `capacity=0`.
-- `vec_destroy(v)`: frees and resets all fields to a safe, zero state.
+The public header includes only `<stddef.h>`. Include the standard headers your
+application uses, such as `<stdio.h>`, `<stdint.h>`, or `<errno.h>`.
 
-Complexity
-- `push`: amortized O(1) with ×2 growth.
-- `reserve`: O(n) only when it must reallocate; O(1) otherwise.
-- `remove(i)`: O(n − i) due to tail shift.
-- `at`, `back`, `begin`, `end`, `clear`, `pop`: O(1).
+## Build and test
 
-API reference
+```sh
+make                 # build/libvec.a
+make test            # test the local sources; no installation required
+make sanitize        # AddressSanitizer + UndefinedBehaviorSanitizer
+make example         # build the stdin example
+printf '10 20 30\n' | ./build/example  # prints 20 and 30 on separate lines
+```
 
-Types
+Tests cover operations, self-append across growth, invalid element sizes,
+overflow, and simulated allocation failures. CI runs tests and sanitizers on
+Linux and macOS with GCC/Clang compiler commands (macOS gcc may be Apple Clang).
+
+Optional installation:
+
+```sh
+make install PREFIX="$HOME/.local"
+```
+
+For an installed library, pass the appropriate include/library directories and
+link with `-lvec` after your source/object files. `CC`, `CPPFLAGS`, `CFLAGS`,
+`LDFLAGS`, `BUILD_DIR`, `PREFIX`, and `DESTDIR` can be overridden with make.
+Use a clean or separate build directory when changing compiler flags.
+
+## API
+
 ```c
 typedef struct Vec {
-  unsigned char *data;
-  size_t len;
-  size_t capacity;
-  size_t elem_size;
-
-#ifndef LITE
-  void* (*push)   (struct Vec*, const void*);
-  void  (*pop)    (struct Vec*);
-  void  (*shrink) (struct Vec*);
-  void* (*at)     (struct Vec*, size_t);
-  void  (*destroy)(struct Vec*);
-  int   (*reserve)(struct Vec*, size_t);
-  void  (*clear)  (struct Vec*);
-  void* (*back)   (struct Vec*);
-  int   (*remove) (struct Vec*, size_t);
-  void* (*begin)  (struct Vec*);
-  void* (*end)    (struct Vec*);
-#endif
+    unsigned char *data;
+    size_t len;
+    size_t capacity;
+    size_t elem_size;
 } Vec;
 ```
 
-Constructors & memory
-- `Vec vec_new(size_t elem_size);`
-  - New empty vector for elements of `elem_size` bytes.
-- `void vec_destroy(Vec* v);`
-  - Free internal storage and reset fields to a zero/NULL state.
+| Function | Behavior |
+| --- | --- |
+| `Vec vec_new(size_t elem_size)` | Create an empty vector; size must be nonzero. |
+| `void *vec_push(Vec *v, const void *elem)` | Copy one element; return its address or `NULL` on failure. |
+| `void vec_pop(Vec *v)` | Remove the last element; no-op when empty. |
+| `int vec_reserve(Vec *v, size_t capacity)` | Ensure at least this capacity; return 1 on success, 0 on failure. |
+| `int vec_shrink(Vec *v)` | Reduce capacity to length; return 1 on success, 0 on failure. Free the buffer when empty. |
+| `void vec_clear(Vec *v)` | Set length to zero, retaining capacity. |
+| `void *vec_at(Vec *v, size_t i)` | Return an element address, or `NULL` if out of bounds. |
+| `void *vec_back(Vec *v)` | Return the last element address, or `NULL` when empty. |
+| `int vec_remove(Vec *v, size_t i)` | Remove and shift the tail; return 1, or 0 if out of bounds. |
+| `void *vec_begin(Vec *v)` | Return the start of the buffer. |
+| `void *vec_end(Vec *v)` | Return one past the last element; never dereference it. |
+| `void vec_destroy(Vec *v)` | Free the buffer and zero all fields; safe to repeat. |
 
-Capacity & size
-- `int vec_reserve(Vec* v, size_t new_capacity);`
-  - Ensure capacity ≥ `new_capacity`. Returns 1 on success, 0 on failure (errno=ENOMEM).
-- `void vec_shrink(Vec* v);`
-  - Shrink allocation to exactly `len`. If `len==0`, free storage and set `capacity=0`.
-- `void vec_clear(Vec* v);`
-  - Set `len=0` without freeing capacity.
+`push` is amortized O(1), `remove` is O(n − i), and reallocations may copy O(n)
+elements. Access, pop, clear, and iteration endpoints are O(1).
 
-Element access & modification
-- `void* vec_push(Vec* v, const void* elem);`
-  - Append a copy of `*elem` (of size `elem_size`). Returns pointer to inserted slot, or `NULL` (errno=ENOMEM).
-- `void vec_pop(Vec* v);`
-  - Remove last element if any; no‑op when empty.
-- `int vec_remove(Vec* v, size_t i);`
-  - Remove element at `i` (shifts tail). Returns 1 on success, 0 if `i >= len`.
-- `void* vec_at(Vec* v, size_t i);`
-  - Pointer to element at `i`, or `NULL` when out‑of‑bounds.
-- `void* vec_back(Vec* v);`
-  - Pointer to last element, or `NULL` when empty.
+## Contract and limitations
 
-Iteration
-- `void* vec_begin(Vec* v);`
-  - Pointer to the first element, or `NULL` when empty.
-- `void* vec_end(Vec* v);`
-  - One‑past‑the‑end pointer (safe to compare, not to dereference). When `len==0`, may be `NULL`.
+- Pass a valid `Vec *` to every operation. Initialize with `vec_new(sizeof(T))`.
+  Do not modify its fields directly; they are exposed for reading and iteration.
+- `vec_new(0)` returns a zero vector and sets `errno = EINVAL`. Push and reserve
+  reject a zero element size; push also rejects a `NULL` source, with `EINVAL`.
+- Allocation failure or capacity overflow returns `NULL`/0 and sets
+  `errno = ENOMEM`. The vector remains unchanged. Inspect `errno` only after
+  failure; successful operations do not promise to reset it.
+- Push reads exactly `elem_size` bytes from its source. Supply a complete,
+  initialized element of the correct type. There is no compile-time type checking.
+- `vec_push(&v, vec_at(&v, i))` supports copying an existing element, even when
+  growth moves the allocation. Arbitrary partial/overlapping sources are not supported.
+- Pointers into the buffer may become invalid after a growing push, reserve,
+  shrink, or destroy. Remove shifts elements; clear/pop end their logical lifetime.
+- Empty vectors have equal begin/end pointers, which may be `NULL`. Do not
+  dereference them or subtract NULL endpoints.
+- Elements are shallow byte copies. If they contain pointers or other resources,
+  the caller manages those resources. Clear, pop, remove, and destroy do not
+  invoke element destructors.
+- A `Vec` owns its buffer. Assignment copies that ownership without duplicating
+  storage: do not independently use/destroy both copies. No clone API is provided.
+- After destroy, reinitialize with `vec_new(sizeof(T))` before reuse.
+- Storage uses `realloc`, suitable for ordinary types with fundamental alignment.
+  Over-aligned types and elements requiring a stable address are not supported.
+- Concurrent mutation/access of the same vector requires external synchronization.
 
-Method‑style (non‑LITE)
-- The same operations are exposed as function pointers on `Vec` when built without `-DLITE`.
-  - Example: `v.push(&v, &elem);` and `for (T* it = v.begin(&v); it != v.end(&v); ++it) ...`
+## Migrating from the method-pointer API
 
-Portability
-- Uses `SIZE_MAX` from `<stdint.h>` (C99+). Tested with standard libcs on Linux/macOS.
+This is a breaking API/ABI change. Recompile the library and all consumers.
+
+```c
+/* Before */
+v.push(&v, &item);
+v.destroy(&v);
+
+/* Now */
+vec_push(&v, &item);
+vec_destroy(&v);
+```
+
+Method pointers and the `LITE` configuration are removed. The structure now always
+contains one data pointer and three sizes. `vec_shrink` now returns an `int` so
+callers can check for allocation failure. The header no longer implicitly
+includes unrelated standard headers.
+
+## Scope
+
+Choose Vec if you want a small, inspectable implementation with a function-based
+API and recoverable allocation errors. A typed macro-based container can be a
+better fit if compile-time type checking and terse element expressions matter
+more to you. Vec aims to remain a focused dynamic array.
+
+MIT licensed; see [LICENSE](LICENSE).
