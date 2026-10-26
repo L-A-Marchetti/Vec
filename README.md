@@ -1,14 +1,27 @@
 # Vec
 
-A small generic dynamic array for C11, with ordinary functions and explicit
-allocation errors. Copy `vec.c` and `vec.h` into your project; no dependencies
-beyond the C standard library.
+[![C tests](https://github.com/L-A-Marchetti/Vec/actions/workflows/ci.yml/badge.svg)](https://github.com/L-A-Marchetti/Vec/actions/workflows/ci.yml)
 
-Vec stores shallow copies of fixed-size elements in contiguous memory. It grows
-geometrically, provides bounds-checked access, and leaves the vector unchanged
-when an allocation fails. It does not print errors or terminate your program.
+**A small generic dynamic array for C11. Two files, ordinary functions, explicit allocation errors.**
+
+Copy [`vec.c`](vec.c) and [`vec.h`](vec.h) into your project. Vec stores fixed-size
+elements contiguously, grows geometrically, and leaves existing contents intact
+when allocation fails. It has no dependencies beyond the C standard library.
+
+## Why Vec?
+
+- **Easy to inspect:** a compact implementation with a function-based API.
+- **Recoverable errors:** allocation failures return to your application; the library never prints or exits.
+- **Predictable storage:** contiguous elements, bounds-checked access, explicit reserve and shrink.
+- **Simple integration:** compile two files alongside your own code; no installation or code generation required.
+
+Vec uses runtime element sizes and shallow copies. It offers no compile-time type
+checking or automatic element cleanup. Specialized typed code can be faster,
+especially for small elements; see the [measured results](benchmarks/README.md).
 
 ## Quick start
+
+Save this as `main.c` beside `vec.c` and `vec.h`:
 
 ```c
 #include "vec.h"
@@ -32,120 +45,50 @@ int main(void)
 }
 ```
 
-Compile alongside your application:
-
 ```sh
-cc -std=c11 -O2 -Wall -Wextra -Ipath/to/Vec main.c path/to/Vec/vec.c -o app
+cc -std=c11 -O2 -Wall -Wextra main.c vec.c -o app
+./app
 ```
 
-The public header includes only `<stddef.h>`. Include the standard headers your
-application uses, such as `<stdio.h>`, `<stdint.h>`, or `<errno.h>`.
+## Example: summarize request records
 
-## Build and test
+The [example program](example.c) reads HTTP status/response-size pairs, stores
+request structures in a Vec, then groups them by status:
+
+```sh
+make example
+printf '200 512\n404 128\n200 1024\n' | ./build/example
+```
+
+```text
+status requests bytes
+200 2 1536
+404 1 128
+```
+
+It demonstrates structure copies, checked insertion, iteration, and cleanup on
+input or allocation errors. This example retains all records for demonstration;
+a tool needing only these totals could aggregate them as it reads instead.
+
+## Build and check
 
 ```sh
 make                 # build/libvec.a
-make test            # test the local sources; no installation required
-make sanitize        # AddressSanitizer + UndefinedBehaviorSanitizer
-make example         # build the stdin example
-printf '10 20 30\n' | ./build/example  # prints 20 and 30 on separate lines
+make test            # local library tests; no installation required
+make test-example    # valid, malformed, and overflow inputs
+make sanitize        # library + example under ASan/UBSan
+make bench           # measured runs against a specialized typed baseline
 ```
 
-Tests cover operations, self-append across growth, invalid element sizes,
-overflow, and simulated allocation failures. CI runs tests and sanitizers on
-Linux and macOS with GCC/Clang compiler commands (macOS gcc may be Apple Clang).
+Tests include self-append across growth, overflow guards, and simulated allocation
+failures. CI runs library/example checks, sanitizers, and a benchmark correctness
+smoke run on Linux and macOS. CI timings are not performance thresholds.
 
-Optional installation:
+## Documentation
 
-```sh
-make install PREFIX="$HOME/.local"
-```
-
-For an installed library, pass the appropriate include/library directories and
-link with `-lvec` after your source/object files. `CC`, `CPPFLAGS`, `CFLAGS`,
-`LDFLAGS`, `BUILD_DIR`, `PREFIX`, and `DESTDIR` can be overridden with make.
-Use a clean or separate build directory when changing compiler flags.
-
-## API
-
-```c
-typedef struct Vec {
-    unsigned char *data;
-    size_t len;
-    size_t capacity;
-    size_t elem_size;
-} Vec;
-```
-
-| Function | Behavior |
-| --- | --- |
-| `Vec vec_new(size_t elem_size)` | Create an empty vector; size must be nonzero. |
-| `void *vec_push(Vec *v, const void *elem)` | Copy one element; return its address or `NULL` on failure. |
-| `void vec_pop(Vec *v)` | Remove the last element; no-op when empty. |
-| `int vec_reserve(Vec *v, size_t capacity)` | Ensure at least this capacity; return 1 on success, 0 on failure. |
-| `int vec_shrink(Vec *v)` | Reduce capacity to length; return 1 on success, 0 on failure. Free the buffer when empty. |
-| `void vec_clear(Vec *v)` | Set length to zero, retaining capacity. |
-| `void *vec_at(Vec *v, size_t i)` | Return an element address, or `NULL` if out of bounds. |
-| `void *vec_back(Vec *v)` | Return the last element address, or `NULL` when empty. |
-| `int vec_remove(Vec *v, size_t i)` | Remove and shift the tail; return 1, or 0 if out of bounds. |
-| `void *vec_begin(Vec *v)` | Return the start of the buffer. |
-| `void *vec_end(Vec *v)` | Return one past the last element; never dereference it. |
-| `void vec_destroy(Vec *v)` | Free the buffer and zero all fields; safe to repeat. |
-
-`push` is amortized O(1), `remove` is O(n − i), and reallocations may copy O(n)
-elements. Access, pop, clear, and iteration endpoints are O(1).
-
-## Contract and limitations
-
-- Pass a valid `Vec *` to every operation. Initialize with `vec_new(sizeof(T))`.
-  Do not modify its fields directly; they are exposed for reading and iteration.
-- `vec_new(0)` returns a zero vector and sets `errno = EINVAL`. Push and reserve
-  reject a zero element size; push also rejects a `NULL` source, with `EINVAL`.
-- Allocation failure or capacity overflow returns `NULL`/0 and sets
-  `errno = ENOMEM`. The vector remains unchanged. Inspect `errno` only after
-  failure; successful operations do not promise to reset it.
-- Push reads exactly `elem_size` bytes from its source. Supply a complete,
-  initialized element of the correct type. There is no compile-time type checking.
-- `vec_push(&v, vec_at(&v, i))` supports copying an existing element, even when
-  growth moves the allocation. Arbitrary partial/overlapping sources are not supported.
-- Pointers into the buffer may become invalid after a growing push, reserve,
-  shrink, or destroy. Remove shifts elements; clear/pop end their logical lifetime.
-- Empty vectors have equal begin/end pointers, which may be `NULL`. Do not
-  dereference them or subtract NULL endpoints.
-- Elements are shallow byte copies. If they contain pointers or other resources,
-  the caller manages those resources. Clear, pop, remove, and destroy do not
-  invoke element destructors.
-- A `Vec` owns its buffer. Assignment copies that ownership without duplicating
-  storage: do not independently use/destroy both copies. No clone API is provided.
-- After destroy, reinitialize with `vec_new(sizeof(T))` before reuse.
-- Storage uses `realloc`, suitable for ordinary types with fundamental alignment.
-  Over-aligned types and elements requiring a stable address are not supported.
-- Concurrent mutation/access of the same vector requires external synchronization.
-
-## Migrating from the method-pointer API
-
-This is a breaking API/ABI change. Recompile the library and all consumers.
-
-```c
-/* Before */
-v.push(&v, &item);
-v.destroy(&v);
-
-/* Now */
-vec_push(&v, &item);
-vec_destroy(&v);
-```
-
-Method pointers and the `LITE` configuration are removed. The structure now always
-contains one data pointer and three sizes. `vec_shrink` now returns an `int` so
-callers can check for allocation failure. The header no longer implicitly
-includes unrelated standard headers.
-
-## Scope
-
-Choose Vec if you want a small, inspectable implementation with a function-based
-API and recoverable allocation errors. A typed macro-based container can be a
-better fit if compile-time type checking and terse element expressions matter
-more to you. Vec aims to remain a focused dynamic array.
+- [API and ownership](docs/API.md): all functions, errors, pointer invalidation, structures, and owned pointers.
+- [Build and integration](docs/BUILDING.md): static linking, installation, compiler flags, and sanitizers.
+- [Benchmarks](benchmarks/README.md): methodology, reproduction commands, raw results, and limitations.
+- [Changelog](CHANGELOG.md).
 
 MIT licensed; see [LICENSE](LICENSE).

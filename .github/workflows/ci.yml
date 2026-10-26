@@ -9,7 +9,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - run: make CC=${{ matrix.compiler }} test
+      - run: make CC=${{ matrix.compiler }} test test-example
       - run: make CC=${{ matrix.compiler }} sanitize
-      - run: make CC=${{ matrix.compiler }} build/example
-      - run: test "$(printf '10 20 30\n' | ./build/example)" = "$(printf '20\n30')"
+      - run: make CC=${{ matrix.compiler }} build/bench_vec
+      - run: ./build/bench_vec 1000 2

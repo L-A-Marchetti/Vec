@@ -11,8 +11,10 @@ LIB := $(BUILD_DIR)/libvec.a
 TEST_BIN := $(BUILD_DIR)/test_vec
 FAIL_BIN := $(BUILD_DIR)/test_alloc_failure
 EXAMPLE_BIN := $(BUILD_DIR)/example
+BENCH_BIN := $(BUILD_DIR)/bench_vec
+BENCH_ARGS ?= 1000000 7
 
-.PHONY: all test example sanitize clean install
+.PHONY: all test test-example example bench sanitize clean install
 all: $(LIB)
 
 $(BUILD_DIR):
@@ -39,8 +41,17 @@ $(EXAMPLE_BIN): example.c vec.h $(LIB)
 
 example: $(EXAMPLE_BIN)
 
+test-example: $(EXAMPLE_BIN) tests/test_example.sh
+	sh tests/test_example.sh $(EXAMPLE_BIN)
+
+$(BENCH_BIN): benchmarks/bench_vec.c vec.h $(LIB)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -I. benchmarks/bench_vec.c $(LIB) $(LDFLAGS) -o $@
+
+bench: $(BENCH_BIN)
+	$(BENCH_BIN) $(BENCH_ARGS)
+
 sanitize:
-	$(MAKE) BUILD_DIR=$(BUILD_DIR)/sanitize CFLAGS='-std=c11 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer' LDFLAGS='-fsanitize=address,undefined' test
+	$(MAKE) BUILD_DIR=$(BUILD_DIR)/sanitize CFLAGS='-std=c11 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer' LDFLAGS='-fsanitize=address,undefined' test test-example
 
 clean:
 	rm -rf $(BUILD_DIR)

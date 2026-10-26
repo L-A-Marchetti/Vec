@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.0 — 2026-10-26
 
 ### Breaking changes
 
@@ -22,4 +22,7 @@
 - Add self-push, invalid-input, and simulated allocation-failure tests.
 - Add sanitizer target and Linux/macOS CI using GCC/Clang compiler commands.
 - Replace method-style examples, document ownership and pointer invalidation,
-  and provide a stdin-based CLI example.
+  and provide a request-summary CLI example with checked input.
+- Add standalone API/build documentation and reproducible typed-baseline
+  benchmarks with raw results and methodology.
+- Check example error handling and benchmark correctness in CI.
