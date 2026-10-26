@@ -27,17 +27,20 @@ Save this as `main.c` beside `vec.c` and `vec.h`:
 #include "vec.h"
 #include <stdio.h>
 
+typedef struct Point { double x, y; } Point;
+
 int main(void)
 {
-    Vec v = vec_new(sizeof(int));
-    int value = 42;
+    Vec points = vec_new(sizeof(Point));
+    Point point = {1.0, 2.0};
 
-    if (vec_push(&v, &value) == NULL) {
-        vec_destroy(&v);
+    if (vec_push(&points, &point) == NULL) {
+        vec_destroy(&points);
         return 1;
     }
-    printf("%d\n", *(int *)vec_at(&v, 0));
-    vec_destroy(&v);
+    Point *first = vec_at(&points, 0);
+    printf("%.1f, %.1f\n", first->x, first->y);
+    vec_destroy(&points);
     return 0;
 }
 ```
